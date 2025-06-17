@@ -1,0 +1,1303 @@
+@page "/bletest"
+@using BleLib.Models
+@using BleLib.Services
+@using BleLib.Exceptions
+@inject IBluetoothService BluetoothService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>BLE Test</PageTitle>
+
+<div class="container">
+    <h1>BLE Device Test</h1>
+    
+    <!-- Global Error Handler -->
+    @if (_globalException != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <h4 class="alert-heading">Unhandled Exception</h4>
+            <p><strong>Type:</strong> @_globalException.GetType().Name</p>
+            <p><strong>Message:</strong> @_globalException.Message</p>
+            @if (_showGlobalExceptionDetails)
+            {
+                <hr>
+                <p><strong>Stack Trace:</strong></p>
+                <pre class="mb-0"><code>@_globalException.StackTrace</code></pre>
+                @if (_globalException.InnerException != null)
+                {
+                    <hr>
+                    <p><strong>Inner Exception:</strong></p>
+                    <p><strong>Type:</strong> @_globalException.InnerException.GetType().Name</p>
+                    <p><strong>Message:</strong> @_globalException.InnerException.Message</p>
+                }
+            }
+            <div class="mt-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" @onclick="ToggleGlobalExceptionDetails">
+                    @(_showGlobalExceptionDetails ? "Hide" : "Show") Details
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="ClearGlobalException">
+                    Clear Error
+                </button>
+            </div>
+            <button type="button" class="btn-close" @onclick="ClearGlobalException"></button>
+        </div>
+    }
+
+    <div class="controls">
+        <button class="btn btn-primary" @onclick="InitializeBluetooth" disabled="@_isInitializing">
+            @if (_isInitializing)
+            {
+                <span>Initializing...</span>
+            }
+            else
+            {
+                <span>Initialize Bluetooth</span>
+            }
+        </button>
+        
+        <button class="btn btn-success" @onclick="StartScanning" disabled="@(!_isInitialized || _isScanning)">
+            @if (_isScanning)
+            {
+                <span>Scanning...</span>
+            }
+            else
+            {
+                <span>Start Scan</span>
+            }
+        </button>
+        
+        <button class="btn btn-warning" @onclick="StopScanning" disabled="@(!_isScanning)">
+            Stop Scan
+        </button>
+        
+        <button class="btn btn-info" @onclick="RefreshDevices" disabled="@(!_isInitialized)">
+            Refresh
+        </button>
+        
+        <button class="btn btn-secondary" @onclick="ClearErrors">
+            Clear Errors
+        </button>
+        
+        <button class="btn btn-outline-secondary" @onclick="ClearDevices">
+            Clear Devices
+        </button>
+        
+        <button class="btn btn-outline-danger" @onclick="TestExceptionHandling">
+            Test Exception
+        </button>
+        
+        <button class="btn btn-outline-warning" @onclick="TestUnhandledException">
+            Test Unhandled
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert @_statusClass alert-dismissible fade show" role="alert">
+            <h4 class="alert-heading">@_statusTitle</h4>
+            <p>@_statusMessage</p>
+            @if (_showDetails && !string.IsNullOrEmpty(_exceptionDetails))
+            {
+                <hr>
+                <p><strong>Exception Details:</strong></p>
+                <pre class="mb-0"><code>@_exceptionDetails</code></pre>
+            }
+            <div class="mt-3">
+                @if (_showDetails)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary me-2" @onclick="ToggleDetails">
+                        Hide Details
+                    </button>
+                }
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="ClearErrors">
+                    Clear
+                </button>
+            </div>
+            <button type="button" class="btn-close" @onclick="ClearErrors"></button>
+        </div>
+    }
+
+    @if (_isInitialized)
+    {
+        <div class="device-list">
+            <div class="device-header-row">
+                <h3>Discovered Devices (@_discoveredDevices.Count)</h3>
+                @if (_isScanning)
+                {
+                    <div class="scanning-indicator">
+                        <span class="scanning-dot"></span>
+                        <span>Scanning...</span>
+                    </div>
+                }
+            </div>
+            
+            @if (_discoveredDevices.Count == 0)
+            {
+                <p>No devices found. Start scanning to discover BLE devices.</p>
+            }
+            else
+            {
+                <div class="devices">
+                    @foreach (var device in _discoveredDevices)
+                    {
+                        <div class="device-card @(IsDeviceNew(device.Address) ? "new-device" : "")">
+                            <div class="device-header">
+                                <h4>@device.Name</h4>
+                                <span class="address">@device.Address</span>
+                                @if (IsDeviceNew(device.Address))
+                                {
+                                    <span class="new-badge">NEW</span>
+                                }
+                            </div>
+                            
+                            <div class="device-details">
+                                <div class="detail-row">
+                                    <span class="label">Signal Strength:</span>
+                                    <span class="value">@device.SignalStrength dBm</span>
+                                </div>
+                                
+                                <div class="detail-row">
+                                    <span class="label">Last Seen:</span>
+                                    <span class="value">@device.LastSeen.ToString("HH:mm:ss")</span>
+                                </div>
+                                
+                                <div class="detail-row">
+                                    <span class="label">Connectable:</span>
+                                    <span class="value">@(device.IsConnectable ? "Yes" : "No")</span>
+                                </div>
+                                
+                                @if (device.TxPowerLevel != 0)
+                                {
+                                    <div class="detail-row">
+                                        <span class="label">TX Power:</span>
+                                        <span class="value">@device.TxPowerLevel dBm</span>
+                                    </div>
+                                }
+                            </div>
+
+                            @if (device.ServiceUuids.Count > 0)
+                            {
+                                <div class="services">
+                                    <h5>Services (@device.ServiceUuids.Count)</h5>
+                                    <div class="service-list">
+                                        @foreach (var serviceUuid in device.ServiceUuids.Take(5))
+                                        {
+                                            <span class="service-uuid">@serviceUuid.ToString("N").Substring(0, 8)...</span>
+                                        }
+                                        @if (device.ServiceUuids.Count > 5)
+                                        {
+                                            <span class="service-uuid">+@(device.ServiceUuids.Count - 5) more</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            @if (device.ManufacturerData.Count > 0)
+                            {
+                                <div class="manufacturer-data">
+                                    <h5>Manufacturer Data (@device.ManufacturerData.Count)</h5>
+                                    <div class="manufacturer-list">
+                                        @foreach (var manufacturer in device.ManufacturerData.Take(3))
+                                        {
+                                            <div class="manufacturer-item">
+                                                <div class="manufacturer-header">
+                                                    <span class="company-id">0x@(manufacturer.Key.ToString("X4"))</span>
+                                                    <span class="company-name">@GetCompanyName(manufacturer.Key)</span>
+                                                    <span class="data-length">@(manufacturer.Value.Length) bytes</span>
+                                                </div>
+                                                <div class="manufacturer-data-bytes">
+                                                    <span class="data-hex">@BitConverter.ToString(manufacturer.Value).Replace("-", " ")</span>
+                                                </div>
+                                            </div>
+                                        }
+                                        @if (device.ManufacturerData.Count > 3)
+                                        {
+                                            <div class="manufacturer-item">
+                                                <span class="more-indicator">+@(device.ManufacturerData.Count - 3) more manufacturers</span>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="device-actions">
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => ConnectToDevice(device)" disabled="@device.IsConnected">
+                                    @if (device.IsConnected)
+                                    {
+                                        <span>Connected</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Connect</span>
+                                    }
+                                </button>
+                                
+                                @if (device.IsConnected)
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectFromDevice(device)">
+                                        Disconnect
+                                    </button>
+                                    
+                                    <button class="btn btn-sm btn-outline-info" @onclick="() => GetServices(device)">
+                                        Get Services
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (_selectedDevice != null && _deviceServices.Count > 0)
+    {
+        <div class="services-modal">
+            <h3>Services for @_selectedDevice.Name</h3>
+            <div class="services-list">
+                @foreach (var service in _deviceServices)
+                {
+                    <div class="service-card">
+                        <h4>@service.Name</h4>
+                        <p class="service-uuid">@service.ServiceUuid</p>
+                        <p>Characteristics: @service.Characteristics.Count</p>
+                        
+                        @if (service.Characteristics.Count > 0)
+                        {
+                            <div class="characteristics">
+                                @foreach (var characteristic in service.Characteristics)
+                                {
+                                    <div class="characteristic">
+                                        <span class="char-name">@characteristic.Name</span>
+                                        <div class="char-properties">
+                                            @if (characteristic.CanRead)
+                                            {
+                                                <span class="badge badge-primary">R</span>
+                                            }
+                                            @if (characteristic.CanWrite)
+                                            {
+                                                <span class="badge badge-success">W</span>
+                                            }
+                                            @if (characteristic.CanNotify)
+                                            {
+                                                <span class="badge badge-info">N</span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- Debug Output Section -->
+    @if (_showDebugOutput)
+    {
+        <div class="debug-section">
+            <h3>Debug Output</h3>
+            <div class="debug-controls">
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearDebugOutput">
+                    Clear Debug
+                </button>
+                <button class="btn btn-sm btn-outline-info" @onclick="CopyDebugOutput">
+                    Copy to Clipboard
+                </button>
+            </div>
+            <div class="debug-output">
+                @foreach (var message in _debugMessages)
+                {
+                    <div class="debug-message @message.Type">
+                        <span class="debug-timestamp">@message.Timestamp.ToString("HH:mm:ss.fff")</span>
+                        <span class="debug-text">@message.Text</span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- Debug Toggle -->
+    <div class="debug-toggle">
+        <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleDebugOutput">
+            @(_showDebugOutput ? "Hide" : "Show") Debug Output
+        </button>
+    </div>
+</div>
+
+<style>
+    .container {
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .controls {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background-color 0.3s;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn-primary { background-color: #007bff; color: white; }
+    .btn-success { background-color: #28a745; color: white; }
+    .btn-warning { background-color: #ffc107; color: black; }
+    .btn-info { background-color: #17a2b8; color: white; }
+    .btn-danger { background-color: #dc3545; color: white; }
+    .btn-secondary { background-color: #6c757d; color: white; }
+    .btn-outline-primary { background-color: transparent; color: #007bff; border: 1px solid #007bff; }
+    .btn-outline-danger { background-color: transparent; color: #dc3545; border: 1px solid #dc3545; }
+    .btn-outline-info { background-color: transparent; color: #17a2b8; border: 1px solid #17a2b8; }
+    .btn-outline-secondary { background-color: transparent; color: #6c757d; border: 1px solid #6c757d; }
+    .btn-outline-warning { background-color: transparent; color: #ffc107; border: 1px solid #ffc107; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+    }
+
+    .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .alert-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .alert-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+
+    .device-list {
+        margin-top: 20px;
+    }
+
+    .device-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+
+    .scanning-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #17a2b8;
+        font-weight: bold;
+    }
+
+    .scanning-dot {
+        width: 8px;
+        height: 8px;
+        background-color: #17a2b8;
+        border-radius: 50%;
+        animation: scanningPulse 1.5s ease-in-out infinite;
+    }
+
+    @@keyframes scanningPulse {
+        0% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(1.2); }
+        100% { opacity: 1; transform: scale(1); }
+    }
+
+    .devices {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 20px;
+        margin-top: 15px;
+    }
+
+    .device-card {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        background-color: #f9f9f9;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+
+    .device-card.new-device {
+        border-color: #28a745;
+        background-color: #f8fff9;
+        box-shadow: 0 4px 8px rgba(40, 167, 69, 0.2);
+        animation: newDevicePulse 2s ease-in-out;
+    }
+
+    @@keyframes newDevicePulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); }
+    }
+
+    .new-badge {
+        background-color: #28a745;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: bold;
+        margin-left: 8px;
+        animation: badgePulse 1.5s ease-in-out infinite;
+    }
+
+    @@keyframes badgePulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+
+    .device-header {
+        margin-bottom: 10px;
+    }
+
+    .device-header h4 {
+        margin: 0 0 5px 0;
+        color: #333;
+    }
+
+    .address {
+        font-family: monospace;
+        color: #666;
+        font-size: 12px;
+    }
+
+    .device-details {
+        margin-bottom: 15px;
+    }
+
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        font-size: 14px;
+    }
+
+    .label {
+        font-weight: bold;
+        color: #555;
+    }
+
+    .value {
+        color: #333;
+    }
+
+    .services, .manufacturer-data {
+        margin-bottom: 15px;
+    }
+
+    .services h5, .manufacturer-data h5 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        color: #555;
+    }
+
+    .service-list, .manufacturer-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+
+    .service-uuid, .manufacturer-item {
+        background-color: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-family: monospace;
+    }
+
+    .company-id {
+        font-weight: bold;
+        color: #007bff;
+    }
+
+    .data-length {
+        color: #666;
+        margin-left: 5px;
+    }
+
+    .device-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .services-modal {
+        margin-top: 30px;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background-color: #f9f9f9;
+    }
+
+    .services-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .service-card {
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 15px;
+        background-color: white;
+    }
+
+    .service-card h4 {
+        margin: 0 0 5px 0;
+        color: #333;
+    }
+
+    .service-uuid {
+        font-family: monospace;
+        color: #666;
+        font-size: 12px;
+        margin-bottom: 10px;
+    }
+
+    .characteristics {
+        margin-top: 10px;
+    }
+
+    .characteristic {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    .char-name {
+        font-family: monospace;
+        font-size: 12px;
+        color: #333;
+    }
+
+    .char-properties {
+        display: flex;
+        gap: 3px;
+    }
+
+    .badge {
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: bold;
+    }
+
+    .badge-primary { background-color: #007bff; color: white; }
+    .badge-success { background-color: #28a745; color: white; }
+    .badge-info { background-color: #17a2b8; color: white; }
+
+    .debug-section {
+        margin-top: 30px;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background-color: #f9f9f9;
+    }
+
+    .debug-controls {
+        margin-bottom: 10px;
+        display: flex;
+        gap: 10px;
+    }
+
+    .debug-output {
+        margin-top: 10px;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .debug-message {
+        margin-bottom: 5px;
+        padding: 3px 6px;
+        border-radius: 3px;
+        font-family: monospace;
+        font-size: 12px;
+    }
+
+    .debug-message.info {
+        background-color: #e3f2fd;
+        color: #1565c0;
+        border-left: 3px solid #2196f3;
+    }
+
+    .debug-message.warning {
+        background-color: #fff3e0;
+        color: #ef6c00;
+        border-left: 3px solid #ff9800;
+    }
+
+    .debug-message.error {
+        background-color: #ffebee;
+        color: #c62828;
+        border-left: 3px solid #f44336;
+    }
+
+    .debug-message.success {
+        background-color: #e8f5e8;
+        color: #2e7d32;
+        border-left: 3px solid #4caf50;
+    }
+
+    .debug-timestamp {
+        font-family: monospace;
+        font-size: 10px;
+        color: #666;
+        margin-right: 8px;
+    }
+
+    .debug-text {
+        font-family: monospace;
+        font-size: 12px;
+        color: #333;
+    }
+
+    .debug-toggle {
+        margin-top: 10px;
+        text-align: right;
+    }
+</style>
+
+@code {
+    private bool _isInitialized = false;
+    private bool _isInitializing = false;
+    private bool _isScanning = false;
+    private bool _showDetails = false;
+    private string _statusMessage = "";
+    private string _statusTitle = "";
+    private string _statusClass = "alert-info";
+    private string _exceptionType = "";
+    private string _exceptionMessage = "";
+    private string _exceptionStackTrace = "";
+    private string _innerExceptionType = "";
+    private string _innerExceptionMessage = "";
+    private string _exceptionDetails = "";
+    private List<BluetoothDevice> _discoveredDevices = new();
+    private BluetoothDevice? _selectedDevice;
+    private List<BluetoothService> _deviceServices = new();
+    
+    // Device tracking for dynamic discovery
+    private HashSet<string> _knownDeviceAddresses = new();
+    private Dictionary<string, DateTime> _deviceDiscoveryTimes = new();
+
+    // Global exception handling
+    private Exception? _globalException;
+    private bool _showGlobalExceptionDetails = false;
+
+    // Debugging
+    private bool _showDebugOutput = false;
+    private List<DebugMessage> _debugMessages = new();
+
+    // Debug message class
+    private class DebugMessage
+    {
+        public DateTime Timestamp { get; set; }
+        public string Text { get; set; } = "";
+        public string Type { get; set; } = "info"; // info, warning, error, success
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        ShowStatus("Ready to initialize Bluetooth", "Ready", "info");
+        AddDebugMessage("Component initialized", "info");
+
+        // Note: Global exception handlers are now set up at the application level in App.xaml.cs
+        // This provides better coverage for all exceptions, not just those in this component
+    }
+
+    public void Dispose()
+    {
+        // Clean up any component-specific resources if needed
+    }
+
+    private void AddDebugMessage(string message, string type = "info")
+    {
+        _debugMessages.Add(new DebugMessage
+        {
+            Timestamp = DateTime.Now,
+            Text = message,
+            Type = type
+        });
+        
+        // Keep only last 100 messages
+        if (_debugMessages.Count > 100)
+        {
+            _debugMessages.RemoveAt(0);
+        }
+        
+        StateHasChanged();
+    }
+
+    private void ToggleGlobalExceptionDetails()
+    {
+        _showGlobalExceptionDetails = !_showGlobalExceptionDetails;
+        StateHasChanged();
+    }
+
+    private void ClearGlobalException()
+    {
+        _globalException = null;
+        _showGlobalExceptionDetails = false;
+        StateHasChanged();
+    }
+
+    private void ToggleDebugOutput()
+    {
+        _showDebugOutput = !_showDebugOutput;
+        StateHasChanged();
+    }
+
+    private void ClearDebugOutput()
+    {
+        _debugMessages.Clear();
+        StateHasChanged();
+    }
+
+    private async Task CopyDebugOutput()
+    {
+        try
+        {
+            var debugText = string.Join(Environment.NewLine, 
+                _debugMessages.Select(m => $"[{m.Timestamp:HH:mm:ss.fff}] {m.Text}"));
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", debugText);
+            AddDebugMessage("Debug output copied to clipboard", "success");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Failed to copy debug output: {ex.Message}", "error");
+        }
+    }
+
+    private async Task InitializeBluetooth()
+    {
+        try
+        {
+            _isInitializing = true;
+            ShowStatus("Initializing Bluetooth...", "Initializing", "info");
+            StateHasChanged();
+
+            // Add debug output
+            AddDebugMessage("Starting Bluetooth initialization...", "info");
+            System.Diagnostics.Debug.WriteLine("BLE Test: Starting Bluetooth initialization...");
+
+            var initialized = await BluetoothService.InitializeAsync();
+            if (initialized)
+            {
+                _isInitialized = true;
+                ShowStatus("Bluetooth initialized successfully!", "Success", "success");
+                AddDebugMessage("Bluetooth initialized successfully", "success");
+                System.Diagnostics.Debug.WriteLine("BLE Test: Bluetooth initialized successfully");
+            }
+            else
+            {
+                ShowStatus("Failed to initialize Bluetooth", "Initialization Failed", "danger");
+                AddDebugMessage("Bluetooth initialization returned false", "error");
+                System.Diagnostics.Debug.WriteLine("BLE Test: Bluetooth initialization returned false");
+            }
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during initialization: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during initialization: {ex.Message}");
+            ShowException(ex, "Bluetooth Initialization Error", "danger");
+        }
+        catch (PlatformNotSupportedException ex)
+        {
+            AddDebugMessage($"PlatformNotSupportedException during initialization: {ex.Message}", "warning");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: PlatformNotSupportedException during initialization: {ex.Message}");
+            ShowException(ex, "Platform Not Supported", "warning");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            AddDebugMessage($"UnauthorizedAccessException during initialization: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: UnauthorizedAccessException during initialization: {ex.Message}");
+            ShowException(ex, "Access Denied", "danger");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during initialization: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during initialization: {ex.GetType().Name} - {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Stack trace: {ex.StackTrace}");
+            ShowException(ex, "Unexpected Error", "danger");
+        }
+        finally
+        {
+            _isInitializing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartScanning()
+    {
+        try
+        {
+            _isScanning = true;
+            _discoveredDevices.Clear();
+            
+            // Reset device tracking for new scan
+            _knownDeviceAddresses.Clear();
+            _deviceDiscoveryTimes.Clear();
+            
+            ShowStatus("Starting BLE scan...", "Starting Scan", "info");
+            StateHasChanged();
+
+            AddDebugMessage("Starting BLE scan...", "info");
+            System.Diagnostics.Debug.WriteLine("BLE Test: Starting BLE scan...");
+
+            var scanStarted = await BluetoothService.StartScanningAsync();
+            if (scanStarted)
+            {
+                ShowStatus("Scanning for BLE devices...", "Scanning", "info");
+                AddDebugMessage("Scan started successfully", "success");
+                System.Diagnostics.Debug.WriteLine("BLE Test: Scan started successfully");
+                
+                // Start a timer to refresh the device list
+                _ = Task.Run(async () =>
+                {
+                    while (_isScanning)
+                    {
+                        try
+                        {
+                            await Task.Delay(2000); // Refresh every 2 seconds
+                            await RefreshDevices();
+                        }
+                        catch (Exception ex)
+                        {
+                            AddDebugMessage($"Exception in device refresh loop: {ex.GetType().Name} - {ex.Message}", "error");
+                            System.Diagnostics.Debug.WriteLine($"BLE Test: Exception in device refresh loop: {ex.GetType().Name} - {ex.Message}");
+                            ShowException(ex, "Device Refresh Error", "danger");
+                            break;
+                        }
+                    }
+                });
+            }
+            else
+            {
+                ShowStatus("Failed to start scanning", "Scan Failed", "danger");
+                AddDebugMessage("Failed to start scanning", "error");
+                System.Diagnostics.Debug.WriteLine("BLE Test: Failed to start scanning");
+                _isScanning = false;
+            }
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during scan start: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during scan start: {ex.Message}");
+            ShowException(ex, "Bluetooth Scan Error", "danger");
+            _isScanning = false;
+        }
+        catch (PlatformNotSupportedException ex)
+        {
+            AddDebugMessage($"PlatformNotSupportedException during scan start: {ex.Message}", "warning");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: PlatformNotSupportedException during scan start: {ex.Message}");
+            ShowException(ex, "Platform Not Supported", "warning");
+            _isScanning = false;
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during scan start: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during scan start: {ex.GetType().Name} - {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Stack trace: {ex.StackTrace}");
+            ShowException(ex, "Unexpected Scan Error", "danger");
+            _isScanning = false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task StopScanning()
+    {
+        try
+        {
+            AddDebugMessage("Stopping BLE scan...", "info");
+            System.Diagnostics.Debug.WriteLine("BLE Test: Stopping BLE scan...");
+            await BluetoothService.StopScanningAsync();
+            _isScanning = false;
+            ShowStatus("Scan stopped", "Scan Stopped", "info");
+            AddDebugMessage("Scan stopped successfully", "success");
+            System.Diagnostics.Debug.WriteLine("BLE Test: Scan stopped successfully");
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during scan stop: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during scan stop: {ex.Message}");
+            ShowException(ex, "Stop Scan Error", "danger");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during scan stop: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during scan stop: {ex.GetType().Name} - {ex.Message}");
+            ShowException(ex, "Unexpected Stop Error", "danger");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshDevices()
+    {
+        try
+        {
+            var devices = await BluetoothService.GetDiscoveredDevicesAsync();
+            var newDevices = devices.ToList();
+            
+            // Track changes for debugging
+            var previousCount = _discoveredDevices.Count;
+            var newDeviceCount = 0;
+            var updatedDeviceCount = 0;
+            
+            // Create a dictionary of existing devices for quick lookup
+            var existingDevices = _discoveredDevices.ToDictionary(d => d.Address, d => d);
+            
+            // Process new devices
+            foreach (var newDevice in newDevices)
+            {
+                if (existingDevices.TryGetValue(newDevice.Address, out var existingDevice))
+                {
+                    // Update existing device with new information
+                    existingDevice.SignalStrength = newDevice.SignalStrength;
+                    existingDevice.LastSeen = newDevice.LastSeen;
+                    existingDevice.IsConnectable = newDevice.IsConnectable;
+                    existingDevice.TxPowerLevel = newDevice.TxPowerLevel;
+                    
+                    // Update service UUIDs if they've changed
+                    if (!existingDevice.ServiceUuids.SequenceEqual(newDevice.ServiceUuids))
+                    {
+                        existingDevice.ServiceUuids.Clear();
+                        existingDevice.ServiceUuids.AddRange(newDevice.ServiceUuids);
+                    }
+                    
+                    // Update manufacturer data if it's changed
+                    if (!existingDevice.ManufacturerData.SequenceEqual(newDevice.ManufacturerData))
+                    {
+                        existingDevice.ManufacturerData.Clear();
+                        foreach (var kvp in newDevice.ManufacturerData)
+                        {
+                            existingDevice.ManufacturerData[kvp.Key] = kvp.Value;
+                        }
+                    }
+                    
+                    updatedDeviceCount++;
+                }
+                else
+                {
+                    // Add new device
+                    _discoveredDevices.Add(newDevice);
+                    newDeviceCount++;
+                    
+                    // Mark device as new for visual indication
+                    MarkDeviceAsNew(newDevice.Address);
+                    
+                    // Log new device discovery
+                    AddDebugMessage($"New device discovered: {newDevice.Name} ({newDevice.Address})", "success");
+                    System.Diagnostics.Debug.WriteLine($"BLE Test: New device discovered: {newDevice.Name} ({newDevice.Address})");
+                }
+            }
+            
+            // Remove devices that are no longer in range (optional - you can comment this out if you want to keep old devices)
+            var currentAddresses = newDevices.Select(d => d.Address).ToHashSet();
+            var devicesToRemove = _discoveredDevices.Where(d => !currentAddresses.Contains(d.Address)).ToList();
+            
+            foreach (var deviceToRemove in devicesToRemove)
+            {
+                _discoveredDevices.Remove(deviceToRemove);
+                AddDebugMessage($"Device out of range: {deviceToRemove.Name} ({deviceToRemove.Address})", "warning");
+                System.Diagnostics.Debug.WriteLine($"BLE Test: Device out of range: {deviceToRemove.Name} ({deviceToRemove.Address})");
+            }
+            
+            // Log summary
+            if (newDeviceCount > 0 || updatedDeviceCount > 0 || devicesToRemove.Count > 0)
+            {
+                var summary = $"Devices: {_discoveredDevices.Count} total";
+                if (newDeviceCount > 0) summary += $", +{newDeviceCount} new";
+                if (updatedDeviceCount > 0) summary += $", {updatedDeviceCount} updated";
+                if (devicesToRemove.Count > 0) summary += $", -{devicesToRemove.Count} removed";
+                
+                AddDebugMessage(summary, "info");
+                System.Diagnostics.Debug.WriteLine($"BLE Test: {summary}");
+            }
+            
+            StateHasChanged();
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during device refresh: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during device refresh: {ex.Message}");
+            ShowException(ex, "Device Refresh Error", "danger");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during device refresh: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during device refresh: {ex.GetType().Name} - {ex.Message}");
+            ShowException(ex, "Unexpected Refresh Error", "danger");
+        }
+    }
+
+    private async Task ConnectToDevice(BluetoothDevice device)
+    {
+        try
+        {
+            ShowStatus($"Connecting to {device.Name}...", "Connecting", "info");
+            AddDebugMessage($"Connecting to device {device.Name} ({device.Address})", "info");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Connecting to device {device.Name} ({device.Address})");
+            
+            var connected = await BluetoothService.ConnectToDeviceAsync(device);
+            if (connected)
+            {
+                ShowStatus($"Connected to {device.Name}!", "Connected", "success");
+                AddDebugMessage($"Successfully connected to {device.Name}", "success");
+                System.Diagnostics.Debug.WriteLine($"BLE Test: Successfully connected to {device.Name}");
+            }
+            else
+            {
+                ShowStatus($"Failed to connect to {device.Name}", "Connection Failed", "danger");
+                AddDebugMessage($"Failed to connect to {device.Name}", "error");
+                System.Diagnostics.Debug.WriteLine($"BLE Test: Failed to connect to {device.Name}");
+            }
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during connection: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during connection: {ex.Message}");
+            ShowException(ex, "Connection Error", "danger");
+        }
+        catch (ArgumentException ex)
+        {
+            AddDebugMessage($"ArgumentException during connection: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: ArgumentException during connection: {ex.Message}");
+            ShowException(ex, "Invalid Device", "danger");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during connection: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during connection: {ex.GetType().Name} - {ex.Message}");
+            ShowException(ex, "Unexpected Connection Error", "danger");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task DisconnectFromDevice(BluetoothDevice device)
+    {
+        try
+        {
+            AddDebugMessage($"Disconnecting from device {device.Name}", "info");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Disconnecting from device {device.Name}");
+            await BluetoothService.DisconnectFromDeviceAsync(device);
+            ShowStatus($"Disconnected from {device.Name}", "Disconnected", "info");
+            AddDebugMessage($"Successfully disconnected from {device.Name}", "success");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Successfully disconnected from {device.Name}");
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during disconnection: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during disconnection: {ex.Message}");
+            ShowException(ex, "Disconnection Error", "danger");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during disconnection: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during disconnection: {ex.GetType().Name} - {ex.Message}");
+            ShowException(ex, "Unexpected Disconnection Error", "danger");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task GetServices(BluetoothDevice device)
+    {
+        try
+        {
+            ShowStatus($"Getting services for {device.Name}...", "Getting Services", "info");
+            AddDebugMessage($"Getting services for device {device.Name}", "info");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Getting services for device {device.Name}");
+            
+            var services = await BluetoothService.GetServicesAsync(device);
+            _selectedDevice = device;
+            _deviceServices = services.ToList();
+            ShowStatus($"Found {_deviceServices.Count} services for {device.Name}", "Services Retrieved", "success");
+            AddDebugMessage($"Found {_deviceServices.Count} services for {device.Name}", "success");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Found {_deviceServices.Count} services for {device.Name}");
+        }
+        catch (BluetoothException ex)
+        {
+            AddDebugMessage($"BluetoothException during service retrieval: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during service retrieval: {ex.Message}");
+            ShowException(ex, "Service Retrieval Error", "danger");
+        }
+        catch (ArgumentException ex)
+        {
+            AddDebugMessage($"ArgumentException during service retrieval: {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: ArgumentException during service retrieval: {ex.Message}");
+            ShowException(ex, "Invalid Device", "danger");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during service retrieval: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during service retrieval: {ex.GetType().Name} - {ex.Message}");
+            ShowException(ex, "Unexpected Service Error", "danger");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void ShowStatus(string message, string title, string type)
+    {
+        _statusMessage = message;
+        _statusTitle = title;
+        _statusClass = $"alert-{type}";
+        _showDetails = false;
+        _exceptionDetails = "";
+        _exceptionType = "";
+        _exceptionMessage = "";
+        _exceptionStackTrace = "";
+        _innerExceptionType = "";
+        _innerExceptionMessage = "";
+    }
+
+    private void ShowException(Exception ex, string title, string type)
+    {
+        _statusMessage = ex.Message;
+        _statusTitle = title;
+        _statusClass = $"alert-{type}";
+        _showDetails = true;
+        
+        // Extract exception details
+        _exceptionType = ex.GetType().Name;
+        _exceptionMessage = ex.Message;
+        _exceptionStackTrace = ex.StackTrace ?? "";
+        _exceptionDetails = $"Exception Type: {_exceptionType}\nMessage: {_exceptionMessage}";
+        
+        // Handle inner exception
+        if (ex.InnerException != null)
+        {
+            _innerExceptionType = ex.InnerException.GetType().Name;
+            _innerExceptionMessage = ex.InnerException.Message;
+            _exceptionDetails += $"\n\nInner Exception:\nType: {_innerExceptionType}\nMessage: {_innerExceptionMessage}";
+        }
+        
+        // Add additional context for specific exception types
+        if (ex is BluetoothException bluetoothEx)
+        {
+            _exceptionDetails += $"\n\nBluetooth Error Details:\nThis is a Bluetooth-specific error that occurred during BLE operations.";
+        }
+        else if (ex is PlatformNotSupportedException)
+        {
+            _exceptionDetails += $"\n\nPlatform Support:\nThis operation is not supported on the current platform.";
+        }
+        else if (ex is UnauthorizedAccessException)
+        {
+            _exceptionDetails += $"\n\nPermission Error:\nThe application does not have the required permissions to access Bluetooth.";
+        }
+    }
+
+    private void ToggleDetails()
+    {
+        _showDetails = !_showDetails;
+        StateHasChanged();
+    }
+
+    private void ClearErrors()
+    {
+        _statusMessage = "";
+        _statusTitle = "";
+        _statusClass = "alert-info";
+        _showDetails = false;
+        _exceptionDetails = "";
+        _exceptionType = "";
+        _exceptionMessage = "";
+        _exceptionStackTrace = "";
+        _innerExceptionType = "";
+        _innerExceptionMessage = "";
+        StateHasChanged();
+    }
+
+    private void TestExceptionHandling()
+    {
+        try
+        {
+            AddDebugMessage("Testing exception handling...", "info");
+            
+            // Throw a test exception
+            throw new InvalidOperationException("This is a test exception to verify exception handling is working properly.");
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Test exception caught: {ex.Message}", "error");
+            ShowException(ex, "Test Exception", "warning");
+        }
+    }
+
+    private void TestUnhandledException()
+    {
+        AddDebugMessage("Testing unhandled exception (should be caught by global handler)...", "warning");
+        
+        // This will trigger the global exception handler
+        Task.Run(() =>
+        {
+            throw new InvalidOperationException("This is an unhandled exception test that should be caught by the global handler.");
+        });
+    }
+
+    private bool IsDeviceNew(string address)
+    {
+        if (_deviceDiscoveryTimes.TryGetValue(address, out var discoveryTime))
+        {
+            // Check if device was discovered in the last 5 seconds
+            var isNew = DateTime.Now.Subtract(discoveryTime).TotalSeconds < 5;
+            
+            // If it's no longer new, remove it from tracking to clean up
+            if (!isNew && _deviceDiscoveryTimes.ContainsKey(address))
+            {
+                _deviceDiscoveryTimes.Remove(address);
+            }
+            
+            return isNew;
+        }
+        return false;
+    }
+
+    private void MarkDeviceAsNew(string address)
+    {
+        _deviceDiscoveryTimes[address] = DateTime.Now;
+        _knownDeviceAddresses.Add(address);
+    }
+
+    private void ClearDevices()
+    {
+        _discoveredDevices.Clear();
+        _knownDeviceAddresses.Clear();
+        _deviceDiscoveryTimes.Clear();
+        AddDebugMessage("Device list cleared", "info");
+        StateHasChanged();
+    }
+
+    private string GetCompanyName(ushort companyId)
+    {
+        // Implement your logic to get company name based on the company ID
+        // This is a placeholder and should be replaced with actual implementation
+        return "Unknown Company";
+    }
+}
