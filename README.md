@@ -1,39 +1,27 @@
 # BLE Library
 
-A comprehensive cross-platform Bluetooth Low Energy (BLE) library for .NET 9, supporting Windows and Android platforms with a modern, extensible architecture.
+Cross-platform Bluetooth Low Energy library for .NET 9, supporting Windows and Android.
 
-## 🚀 Features
+## Features
 
-- **Cross-platform support**: Windows 10+ and Android with unified API
-- **Device discovery**: Advanced scanning with signal strength and advertisement data
-- **Rich advertisement data**: Access manufacturer data, service UUIDs, service data, and raw advertisement data
-- **Connection management**: Robust connect/disconnect with error handling
-- **Service discovery**: Complete service and characteristic enumeration
-- **Data operations**: Read, write, and subscribe to characteristics with notifications
-- **Platform abstraction**: Clean separation with factory pattern for easy extension
-- **Comprehensive testing**: Unit, mock, and integration tests with full coverage
-- **Sample applications**: Console and MAUI examples demonstrating real-world usage
+- Cross-platform support for Windows and Android
+- Device discovery and scanning
+- Advertisement data access
+- Connection management
+- Service and characteristic discovery
+- Read, write, and notification support
 
-## 📋 Requirements
+## Installation
 
-- **.NET 9** or later
-- **Windows 10** (version 19041.0 or later) with Bluetooth support
-- **Android** with Microsoft.Maui.Essentials support
-- **Visual Studio 2022** or **VS Code** with .NET 9 workload
-
-## 📋 Project Structure 
-
-## 🚀 Quick Start
-
-### Installation
-
-Add the library to your project:
+Add to your project:
 
 ```xml
 <PackageReference Include="ble_lib" Version="1.0.0" />
 ```
 
-### Basic Usage
+## Usage
+
+### Basic Setup
 
 ```csharp
 using BleLib.Services;
@@ -44,21 +32,7 @@ var bluetoothService = BluetoothServiceFactory.CreateBluetoothService();
 
 // Initialize the service
 await bluetoothService.InitializeAsync();
-
-// Start scanning for devices
-await bluetoothService.StartScanningAsync();
-
-// Wait for devices to be discovered
-await Task.Delay(5000);
-
-// Get discovered devices
-var devices = await bluetoothService.GetDiscoveredDevicesAsync();
-
-// Stop scanning
-await bluetoothService.StopScanningAsync();
 ```
-
-## 📖 Detailed Usage
 
 ### Device Discovery
 
@@ -76,7 +50,7 @@ var devices = await bluetoothService.GetDiscoveredDevicesAsync();
 await bluetoothService.StopScanningAsync();
 ```
 
-### Accessing Advertisement Data
+### Advertisement Data
 
 ```csharp
 foreach (var device in devices)
@@ -142,7 +116,7 @@ if (deviceToConnect != null)
 }
 ```
 
-### Working with Services and Characteristics
+### Services and Characteristics
 
 ```csharp
 // Get services from connected device
@@ -162,7 +136,7 @@ foreach (var service in services)
 }
 ```
 
-### Reading and Writing Data
+### Reading and Writing
 
 ```csharp
 // Example service and characteristic UUIDs (Heart Rate Monitor)
@@ -202,10 +176,9 @@ catch (BluetoothException ex)
 }
 ```
 
-### Subscribing to Notifications
+### Notifications
 
 ```csharp
-// Subscribe to characteristic notifications
 await bluetoothService.SubscribeToCharacteristicAsync(
     deviceToConnect,
     heartRateServiceUuid,
@@ -215,164 +188,34 @@ await bluetoothService.SubscribeToCharacteristicAsync(
         Console.WriteLine($"Received notification: {BitConverter.ToString(data)}");
     });
 
-// Unsubscribe when done
-await bluetoothService.UnsubscribeFromCharacteristicAsync(
-    deviceToConnect,
-    heartRateServiceUuid,
-    heartRateMeasurementUuid);
+await bluetoothService.UnsubscribeFromCharacteristicAsync(device, serviceUuid, characteristicUuid);
 ```
 
 ### Disconnecting
 
 ```csharp
-// Disconnect from device
-await bluetoothService.DisconnectFromDeviceAsync(deviceToConnect);
+await bluetoothService.DisconnectFromDeviceAsync(device);
 ```
 
-## 🧪 Testing
+## Platform Notes
 
-### Running Tests
+**Android**: Requires location permission for scanning.
 
-```bash
-# Navigate to test directory
-cd test
+**Windows**: Requires Bluetooth capability in app manifest. Supports Windows 10 version 19041.0 and later.
 
-# Run all tests
-dotnet test
+## Error Handling
 
-# Run tests for specific framework
-dotnet test --framework net9.0-windows10.0.19041.0
-dotnet test --framework net9.0-android
-
-# Run specific test category
-dotnet test --filter "Category=Unit"
-
-# Run with coverage
-dotnet test --collect:"XPlat Code Coverage"
+```csharp
+try
+{
+    await bluetoothService.ConnectToDeviceAsync(device);
+}
+catch (BluetoothException ex)
+{
+    Console.WriteLine($"Error: {ex.Message}");
+}
 ```
 
-### Test Categories
+## License
 
-- **Unit Tests**: Test individual components in isolation
-- **Mock Tests**: Test with mocked dependencies
-- **Integration Tests**: Test platform-specific implementations
-
-## 📱 Sample Applications
-
-### Console Application
-
-A complete console application demonstrating all library features:
-
-```bash
-cd sample/ConsoleBLE
-dotnet run
-```
-
-### MAUI Application
-
-A modern MAUI application with web interface for testing BLE devices:
-
-```bash
-cd sample/MauiWinAnd
-dotnet run
-```
-
-## 🔧 Development
-
-### Building the Library
-
-```bash
-cd src
-dotnet build
-```
-
-### Running Samples
-
-```bash
-# Console sample
-cd sample/ConsoleBLE
-dotnet run
-
-# MAUI sample
-cd sample/MauiWinAnd
-dotnet run
-```
-
-## 📦 Dependencies
-
-### Core Library
-- **.NET 9**: Base framework
-- **Microsoft.Maui.Essentials**: Android platform support
-
-### Testing
-- **xUnit**: Testing framework
-- **FluentAssertions**: Readable assertions
-- **Moq**: Mocking framework
-- **coverlet.collector**: Code coverage
-
-### Samples
-- **Microsoft.Maui**: MAUI framework for cross-platform UI
-- **Bootstrap**: CSS framework for web UI
-
-## 🏗️ Architecture
-
-### Design Patterns
-
-- **Factory Pattern**: `BluetoothServiceFactory` creates platform-specific implementations
-- **Interface Segregation**: `IBluetoothService` defines the contract
-- **Platform Abstraction**: Clean separation between core logic and platform-specific code
-
-### Key Components
-
-- **Models**: Data structures for devices, services, and characteristics
-- **Services**: Business logic and platform abstraction
-- **Platforms**: Platform-specific implementations
-- **Exceptions**: Custom exception types for error handling
-
-## 🔒 Permissions
-
-### Windows
-- Bluetooth permissions are handled automatically by the Windows runtime
-
-### Android
-- `BLUETOOTH` permission for basic operations
-- `BLUETOOTH_ADMIN` permission for scanning and connecting
-- `ACCESS_FINE_LOCATION` permission for device discovery (Android 6.0+)
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Platform Not Supported**: Ensure you're running on Windows 10+ or Android
-2. **No Devices Found**: Check Bluetooth is enabled and devices are advertising
-3. **Permission Denied**: Ensure proper permissions are granted (especially on Android)
-4. **Connection Failed**: Verify device is in range and not already connected
-
-### Debug Mode
-
-Enable detailed logging by setting environment variables:
-```bash
-set BLE_DEBUG=true
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/ble_lib/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/ble_lib/discussions)
-- **Documentation**: [Wiki](https://github.com/yourusername/ble_lib/wiki)
-
----
-
-**Made with ❤️ for the .NET community** 
+Provided as-is for educational and development purposes. 
