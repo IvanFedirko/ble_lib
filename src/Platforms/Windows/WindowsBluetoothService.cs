@@ -161,6 +161,29 @@ namespace BleLib.Platforms.WindowsBLE
             return await Task.FromResult(_discoveredDevices);
         }
 
+        public async Task<string> GetBluetoothStateAsync()
+        {
+            try
+            {
+                var adapter = await BluetoothAdapter.GetDefaultAsync();
+                if (adapter == null)
+                {
+                    return "Bluetooth adapter not found";
+                }
+
+                var stateInfo = $"Adapter Name: {adapter.DeviceId}, IsLowEnergySupported: {adapter.IsLowEnergySupported}";
+                
+                System.Diagnostics.Debug.WriteLine($"Windows Bluetooth Service: {stateInfo}");
+                return stateInfo;
+            }
+            catch (Exception ex)
+            {
+                var errorInfo = $"Error getting Bluetooth state: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"Windows Bluetooth Service: {errorInfo}");
+                return errorInfo;
+            }
+        }
+
         public async Task<bool> ConnectToDeviceAsync(BleLib.Models.BluetoothDevice device)
         {
             try
@@ -227,6 +250,7 @@ namespace BleLib.Platforms.WindowsBLE
                         Name = characteristic.Uuid.ToString(),
                         CanRead = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Read),
                         CanWrite = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Write),
+                        CanWriteWithoutResponse = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.WriteWithoutResponse),
                         CanNotify = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Notify)
                     });
                 }
@@ -235,6 +259,85 @@ namespace BleLib.Platforms.WindowsBLE
             }
 
             return services;
+        }
+
+        public async Task<IEnumerable<BleLib.Models.BluetoothCharacteristic>> GetCharacteristicsAsync(BleLib.Models.BluetoothDevice device, Guid serviceUuid)
+        {
+            if (!_connectedDevices.TryGetValue(device.Address, out var bluetoothDevice))
+            {
+                throw new BluetoothException("Device not connected");
+            }
+
+            var result = await bluetoothDevice.GetGattServicesAsync();
+            var service = result.Services.FirstOrDefault(s => s.Uuid == serviceUuid);
+            if (service == null)
+            {
+                throw new BluetoothException("Service not found");
+            }
+
+            var characteristics = await service.GetCharacteristicsAsync();
+            var bluetoothCharacteristics = new List<BleLib.Models.BluetoothCharacteristic>();
+            
+            foreach (var characteristic in characteristics.Characteristics)
+            {
+                var bluetoothCharacteristic = new BleLib.Models.BluetoothCharacteristic
+                {
+                    CharacteristicUuid = characteristic.Uuid,
+                    Name = characteristic.Uuid.ToString(),
+                    CanRead = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Read),
+                    CanWrite = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Write),
+                    CanWriteWithoutResponse = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.WriteWithoutResponse),
+                    CanNotify = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Notify)
+                };
+
+                // Get descriptors for this characteristic
+                try
+                {
+                    var descriptors = await characteristic.GetDescriptorsAsync();
+                    foreach (var descriptor in descriptors.Descriptors)
+                    {
+                        bluetoothCharacteristic.Descriptors.Add(new BleLib.Models.BluetoothDescriptor
+                        {
+                            DescriptorUuid = descriptor.Uuid,
+                            Name = descriptor.Uuid.ToString()
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to get descriptors for characteristic {characteristic.Uuid}: {ex.Message}");
+                }
+
+                bluetoothCharacteristics.Add(bluetoothCharacteristic);
+            }
+
+            return bluetoothCharacteristics;
+        }
+
+        public async Task<int> RequestMtuAsync(BleLib.Models.BluetoothDevice device, int mtu)
+        {
+            if (!_connectedDevices.TryGetValue(device.Address, out var bluetoothDevice))
+            {
+                throw new BluetoothException("Device not connected");
+            }
+
+            try
+            {
+                // For Windows, we need to use the GATT session to request MTU
+                // Note: Windows doesn't have a direct MTU negotiation API like Android
+                // We'll return the requested MTU as a best effort
+                System.Diagnostics.Debug.WriteLine($"Requesting MTU: {mtu} bytes (Windows implementation)");
+                
+                // In Windows, the actual MTU is typically negotiated automatically
+                // We'll return the requested value as a best effort
+                return mtu;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"MTU negotiation error: {ex.Message}");
+                // Return a reasonable default if negotiation fails
+                return Math.Min(mtu, 23);
+            }
         }
 
         public async Task<byte[]> ReadCharacteristicAsync(BleLib.Models.BluetoothDevice device, Guid serviceUuid, Guid characteristicUuid)
@@ -306,6 +409,40 @@ namespace BleLib.Platforms.WindowsBLE
             }
         }
 
+        public async Task WriteCharacteristicWithoutResponseAsync(BleLib.Models.BluetoothDevice device, Guid serviceUuid, Guid characteristicUuid, byte[] data)
+        {
+            if (!_connectedDevices.TryGetValue(device.Address, out var bluetoothDevice))
+            {
+                throw new BluetoothException("Device not connected");
+            }
+
+            var result = await bluetoothDevice.GetGattServicesAsync();
+            var service = result.Services.FirstOrDefault(s => s.Uuid == serviceUuid);
+            if (service == null)
+            {
+                throw new BluetoothException("Service not found");
+            }
+
+            var characteristics = await service.GetCharacteristicsAsync();
+            var characteristic = characteristics.Characteristics.FirstOrDefault(c => c.Uuid == characteristicUuid);
+            if (characteristic == null)
+            {
+                throw new BluetoothException("Characteristic not found");
+            }
+
+            if (!characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.WriteWithoutResponse))
+            {
+                throw new BluetoothException("Characteristic does not support write without response");
+            }
+
+            var buffer = CreateBufferFromBytes(data);
+            var writeResult = await characteristic.WriteValueAsync(buffer, GattWriteOption.WriteWithoutResponse);
+            if (writeResult != GattCommunicationStatus.Success)
+            {
+                throw new BluetoothException($"Failed to write characteristic without response: {writeResult}");
+            }
+        }
+
         public async Task SubscribeToCharacteristicAsync(BleLib.Models.BluetoothDevice device, Guid serviceUuid, Guid characteristicUuid, Action<byte[]> callback)
         {
             if (!_connectedDevices.TryGetValue(device.Address, out var bluetoothDevice))
@@ -372,6 +509,79 @@ namespace BleLib.Platforms.WindowsBLE
             if (status != GattCommunicationStatus.Success)
             {
                 throw new BluetoothException($"Failed to unsubscribe from characteristic: {status}");
+            }
+        }
+
+        public async Task<byte[]> ReadDescriptorAsync(BleLib.Models.BluetoothDevice device, Guid serviceUuid, Guid characteristicUuid, Guid descriptorUuid)
+        {
+            if (!_connectedDevices.TryGetValue(device.Address, out var bluetoothDevice))
+            {
+                throw new BluetoothException("Device not connected");
+            }
+
+            var result = await bluetoothDevice.GetGattServicesAsync();
+            var service = result.Services.FirstOrDefault(s => s.Uuid == serviceUuid);
+            if (service == null)
+            {
+                throw new BluetoothException("Service not found");
+            }
+
+            var characteristics = await service.GetCharacteristicsAsync();
+            var characteristic = characteristics.Characteristics.FirstOrDefault(c => c.Uuid == characteristicUuid);
+            if (characteristic == null)
+            {
+                throw new BluetoothException("Characteristic not found");
+            }
+
+            var descriptors = await characteristic.GetDescriptorsAsync();
+            var descriptor = descriptors.Descriptors.FirstOrDefault(d => d.Uuid == descriptorUuid);
+            if (descriptor == null)
+            {
+                throw new BluetoothException("Descriptor not found");
+            }
+
+            var readResult = await descriptor.ReadValueAsync();
+            if (readResult.Status != GattCommunicationStatus.Success)
+            {
+                throw new BluetoothException($"Failed to read descriptor: {readResult.Status}");
+            }
+
+            return ConvertIBufferToBytes(readResult.Value);
+        }
+
+        public async Task WriteDescriptorAsync(BleLib.Models.BluetoothDevice device, Guid serviceUuid, Guid characteristicUuid, Guid descriptorUuid, byte[] data)
+        {
+            if (!_connectedDevices.TryGetValue(device.Address, out var bluetoothDevice))
+            {
+                throw new BluetoothException("Device not connected");
+            }
+
+            var result = await bluetoothDevice.GetGattServicesAsync();
+            var service = result.Services.FirstOrDefault(s => s.Uuid == serviceUuid);
+            if (service == null)
+            {
+                throw new BluetoothException("Service not found");
+            }
+
+            var characteristics = await service.GetCharacteristicsAsync();
+            var characteristic = characteristics.Characteristics.FirstOrDefault(c => c.Uuid == characteristicUuid);
+            if (characteristic == null)
+            {
+                throw new BluetoothException("Characteristic not found");
+            }
+
+            var descriptors = await characteristic.GetDescriptorsAsync();
+            var descriptor = descriptors.Descriptors.FirstOrDefault(d => d.Uuid == descriptorUuid);
+            if (descriptor == null)
+            {
+                throw new BluetoothException("Descriptor not found");
+            }
+
+            var buffer = CreateBufferFromBytes(data);
+            var writeResult = await descriptor.WriteValueAsync(buffer);
+            if (writeResult != GattCommunicationStatus.Success)
+            {
+                throw new BluetoothException($"Failed to write descriptor: {writeResult}");
             }
         }
 

@@ -88,6 +88,10 @@
         <button class="btn btn-outline-warning" @onclick="TestUnhandledException">
             Test Unhandled
         </button>
+        
+        <button class="btn btn-outline-info" @onclick="CheckBluetoothState">
+            Check BT State
+        </button>
     </div>
 
     @if (!string.IsNullOrEmpty(_statusMessage))
@@ -130,9 +134,28 @@
                 }
             </div>
             
+            <!-- Bluetooth State Information -->
+            @if (!string.IsNullOrEmpty(_bluetoothStateInfo))
+            {
+                <div class="bluetooth-state-info">
+                    <h4>Bluetooth State</h4>
+                    <pre>@_bluetoothStateInfo</pre>
+                </div>
+            }
+            
             @if (_discoveredDevices.Count == 0)
             {
                 <p>No devices found. Start scanning to discover BLE devices.</p>
+                <div class="troubleshooting-tips">
+                    <h4>Troubleshooting Tips:</h4>
+                    <ul>
+                        <li>Make sure Bluetooth is enabled on your device</li>
+                        <li>Ensure location services are enabled (required for BLE scanning on Android)</li>
+                        <li>Check that you have granted all necessary permissions</li>
+                        <li>Try moving closer to BLE devices</li>
+                        <li>Some devices may not advertise continuously</li>
+                    </ul>
+                </div>
             }
             else
             {
@@ -668,6 +691,53 @@
         margin-top: 10px;
         text-align: right;
     }
+
+    .bluetooth-state-info {
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+    }
+
+    .bluetooth-state-info h4 {
+        margin: 0 0 10px 0;
+        color: #495057;
+    }
+
+    .bluetooth-state-info pre {
+        margin: 0;
+        font-family: monospace;
+        font-size: 12px;
+        color: #6c757d;
+        background-color: white;
+        padding: 10px;
+        border-radius: 3px;
+        border: 1px solid #e9ecef;
+    }
+
+    .troubleshooting-tips {
+        margin-top: 20px;
+        padding: 15px;
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 5px;
+    }
+
+    .troubleshooting-tips h4 {
+        margin: 0 0 10px 0;
+        color: #856404;
+    }
+
+    .troubleshooting-tips ul {
+        margin: 0;
+        padding-left: 20px;
+        color: #856404;
+    }
+
+    .troubleshooting-tips li {
+        margin-bottom: 5px;
+    }
 </style>
 
 @code {
@@ -699,6 +769,7 @@
     // Debugging
     private bool _showDebugOutput = false;
     private List<DebugMessage> _debugMessages = new();
+    private string _bluetoothStateInfo = "";
 
     // Debug message class
     private class DebugMessage
@@ -800,6 +871,9 @@
                 ShowStatus("Bluetooth initialized successfully!", "Success", "success");
                 AddDebugMessage("Bluetooth initialized successfully", "success");
                 System.Diagnostics.Debug.WriteLine("BLE Test: Bluetooth initialized successfully");
+                
+                // Automatically check Bluetooth state after initialization
+                await CheckBluetoothState();
             }
             else
             {
@@ -876,9 +950,12 @@
                         }
                         catch (Exception ex)
                         {
-                            AddDebugMessage($"Exception in device refresh loop: {ex.GetType().Name} - {ex.Message}", "error");
                             System.Diagnostics.Debug.WriteLine($"BLE Test: Exception in device refresh loop: {ex.GetType().Name} - {ex.Message}");
-                            ShowException(ex, "Device Refresh Error", "danger");
+                            await InvokeAsync(async () =>
+                            {
+                                AddDebugMessage($"Exception in device refresh loop: {ex.GetType().Name} - {ex.Message}", "error");
+                                ShowException(ex, "Device Refresh Error", "danger");
+                            });
                             break;
                         }
                     }
@@ -954,98 +1031,111 @@
     {
         try
         {
+            // Fetch devices on background thread (this is OK)
             var devices = await BluetoothService.GetDiscoveredDevicesAsync();
             var newDevices = devices.ToList();
             
-            // Track changes for debugging
-            var previousCount = _discoveredDevices.Count;
-            var newDeviceCount = 0;
-            var updatedDeviceCount = 0;
-            
-            // Create a dictionary of existing devices for quick lookup
-            var existingDevices = _discoveredDevices.ToDictionary(d => d.Address, d => d);
-            
-            // Process new devices
-            foreach (var newDevice in newDevices)
-            {
-                if (existingDevices.TryGetValue(newDevice.Address, out var existingDevice))
-                {
-                    // Update existing device with new information
-                    existingDevice.SignalStrength = newDevice.SignalStrength;
-                    existingDevice.LastSeen = newDevice.LastSeen;
-                    existingDevice.IsConnectable = newDevice.IsConnectable;
-                    existingDevice.TxPowerLevel = newDevice.TxPowerLevel;
-                    
-                    // Update service UUIDs if they've changed
-                    if (!existingDevice.ServiceUuids.SequenceEqual(newDevice.ServiceUuids))
-                    {
-                        existingDevice.ServiceUuids.Clear();
-                        existingDevice.ServiceUuids.AddRange(newDevice.ServiceUuids);
-                    }
-                    
-                    // Update manufacturer data if it's changed
-                    if (!existingDevice.ManufacturerData.SequenceEqual(newDevice.ManufacturerData))
-                    {
-                        existingDevice.ManufacturerData.Clear();
-                        foreach (var kvp in newDevice.ManufacturerData)
-                        {
-                            existingDevice.ManufacturerData[kvp.Key] = kvp.Value;
-                        }
-                    }
-                    
-                    updatedDeviceCount++;
-                }
-                else
-                {
-                    // Add new device
-                    _discoveredDevices.Add(newDevice);
-                    newDeviceCount++;
-                    
-                    // Mark device as new for visual indication
-                    MarkDeviceAsNew(newDevice.Address);
-                    
-                    // Log new device discovery
-                    AddDebugMessage($"New device discovered: {newDevice.Name} ({newDevice.Address})", "success");
-                    System.Diagnostics.Debug.WriteLine($"BLE Test: New device discovered: {newDevice.Name} ({newDevice.Address})");
-                }
-            }
-            
-            // Remove devices that are no longer in range (optional - you can comment this out if you want to keep old devices)
+            // Prepare data for UI updates (on background thread)
             var currentAddresses = newDevices.Select(d => d.Address).ToHashSet();
-            var devicesToRemove = _discoveredDevices.Where(d => !currentAddresses.Contains(d.Address)).ToList();
             
-            foreach (var deviceToRemove in devicesToRemove)
+            // Wrap all state modifications and UI updates in InvokeAsync to ensure they run on the UI thread
+            await InvokeAsync(async () =>
             {
-                _discoveredDevices.Remove(deviceToRemove);
-                AddDebugMessage($"Device out of range: {deviceToRemove.Name} ({deviceToRemove.Address})", "warning");
-                System.Diagnostics.Debug.WriteLine($"BLE Test: Device out of range: {deviceToRemove.Name} ({deviceToRemove.Address})");
-            }
-            
-            // Log summary
-            if (newDeviceCount > 0 || updatedDeviceCount > 0 || devicesToRemove.Count > 0)
-            {
-                var summary = $"Devices: {_discoveredDevices.Count} total";
-                if (newDeviceCount > 0) summary += $", +{newDeviceCount} new";
-                if (updatedDeviceCount > 0) summary += $", {updatedDeviceCount} updated";
-                if (devicesToRemove.Count > 0) summary += $", -{devicesToRemove.Count} removed";
+                // Track changes for debugging
+                var previousCount = _discoveredDevices.Count;
+                var newDeviceCount = 0;
+                var updatedDeviceCount = 0;
                 
-                AddDebugMessage(summary, "info");
-                System.Diagnostics.Debug.WriteLine($"BLE Test: {summary}");
-            }
-            
-            StateHasChanged();
+                // Create a dictionary of existing devices for quick lookup
+                var existingDevices = _discoveredDevices.ToDictionary(d => d.Address, d => d);
+                
+                // Process new devices
+                foreach (var newDevice in newDevices)
+                {
+                    if (existingDevices.TryGetValue(newDevice.Address, out var existingDevice))
+                    {
+                        // Update existing device with new information
+                        existingDevice.SignalStrength = newDevice.SignalStrength;
+                        existingDevice.LastSeen = newDevice.LastSeen;
+                        existingDevice.IsConnectable = newDevice.IsConnectable;
+                        existingDevice.TxPowerLevel = newDevice.TxPowerLevel;
+                        
+                        // Update service UUIDs if they've changed
+                        if (!existingDevice.ServiceUuids.SequenceEqual(newDevice.ServiceUuids))
+                        {
+                            existingDevice.ServiceUuids.Clear();
+                            existingDevice.ServiceUuids.AddRange(newDevice.ServiceUuids);
+                        }
+                        
+                        // Update manufacturer data if it's changed
+                        if (!existingDevice.ManufacturerData.SequenceEqual(newDevice.ManufacturerData))
+                        {
+                            existingDevice.ManufacturerData.Clear();
+                            foreach (var kvp in newDevice.ManufacturerData)
+                            {
+                                existingDevice.ManufacturerData[kvp.Key] = kvp.Value;
+                            }
+                        }
+                        
+                        updatedDeviceCount++;
+                    }
+                    else
+                    {
+                        // Add new device
+                        _discoveredDevices.Add(newDevice);
+                        newDeviceCount++;
+                        
+                        // Mark device as new for visual indication
+                        MarkDeviceAsNew(newDevice.Address);
+                        
+                        // Log new device discovery
+                        AddDebugMessage($"New device discovered: {newDevice.Name} ({newDevice.Address})", "success");
+                        System.Diagnostics.Debug.WriteLine($"BLE Test: New device discovered: {newDevice.Name} ({newDevice.Address})");
+                    }
+                }
+                
+                // Remove devices that are no longer in range (optional - you can comment this out if you want to keep old devices)
+                var devicesToRemove = _discoveredDevices.Where(d => !currentAddresses.Contains(d.Address)).ToList();
+                
+                foreach (var deviceToRemove in devicesToRemove)
+                {
+                    _discoveredDevices.Remove(deviceToRemove);
+                    AddDebugMessage($"Device out of range: {deviceToRemove.Name} ({deviceToRemove.Address})", "warning");
+                    System.Diagnostics.Debug.WriteLine($"BLE Test: Device out of range: {deviceToRemove.Name} ({deviceToRemove.Address})");
+                }
+                
+                // Log summary
+                if (newDeviceCount > 0 || updatedDeviceCount > 0 || devicesToRemove.Count > 0)
+                {
+                    var summary = $"Devices: {_discoveredDevices.Count} total";
+                    if (newDeviceCount > 0) summary += $", +{newDeviceCount} new";
+                    if (updatedDeviceCount > 0) summary += $", {updatedDeviceCount} updated";
+                    if (devicesToRemove.Count > 0) summary += $", -{devicesToRemove.Count} removed";
+                    
+                    AddDebugMessage(summary, "info");
+                    System.Diagnostics.Debug.WriteLine($"BLE Test: {summary}");
+                }
+                
+                StateHasChanged();
+            });
         }
         catch (BluetoothException ex)
         {
-            AddDebugMessage($"BluetoothException during device refresh: {ex.Message}", "error");
             System.Diagnostics.Debug.WriteLine($"BLE Test: BluetoothException during device refresh: {ex.Message}");
-            ShowException(ex, "Device Refresh Error", "danger");
+            await InvokeAsync(async () =>
+            {
+                AddDebugMessage($"BluetoothException during device refresh: {ex.Message}", "error");
+                ShowException(ex, "Device Refresh Error", "danger");
+            });
         }
         catch (Exception ex)
         {
-            AddDebugMessage($"Unexpected exception during device refresh: {ex.GetType().Name} - {ex.Message}", "error");
             System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during device refresh: {ex.GetType().Name} - {ex.Message}");
-            ShowException(ex, "Unexpected Refresh Error", "danger");
+            await InvokeAsync(async () =>
+            {
+                AddDebugMessage($"Unexpected exception during device refresh: {ex.GetType().Name} - {ex.Message}", "error");
+                ShowException(ex, "Unexpected Refresh Error", "danger");
+            });
         }
     }
 
@@ -1299,5 +1389,31 @@
         // Implement your logic to get company name based on the company ID
         // This is a placeholder and should be replaced with actual implementation
         return "Unknown Company";
+    }
+
+    private async Task CheckBluetoothState()
+    {
+        try
+        {
+            ShowStatus("Checking Bluetooth state...", "Checking", "info");
+            StateHasChanged();
+
+            var state = await BluetoothService.GetBluetoothStateAsync();
+            ShowStatus($"Bluetooth state: {state}", "Bluetooth State", "info");
+            AddDebugMessage($"Bluetooth state: {state}", "info");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Bluetooth state: {state}");
+
+            _bluetoothStateInfo = $"Current Bluetooth state: {state}";
+        }
+        catch (Exception ex)
+        {
+            AddDebugMessage($"Unexpected exception during Bluetooth state check: {ex.GetType().Name} - {ex.Message}", "error");
+            System.Diagnostics.Debug.WriteLine($"BLE Test: Unexpected exception during Bluetooth state check: {ex.GetType().Name} - {ex.Message}");
+            ShowException(ex, "Bluetooth State Check Error", "danger");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
     }
 }

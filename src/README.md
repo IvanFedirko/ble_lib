@@ -1,19 +1,19 @@
 # BLE Library
 
-A cross-platform Bluetooth Low Energy (BLE) library for .NET 9, supporting Windows and Android platforms.
+Cross-platform Bluetooth Low Energy library for .NET 9, supporting Windows and Android.
 
 ## Features
 
-- **Cross-platform support**: Windows and Android
-- **Device discovery**: Scan for BLE devices
-- **Advertisement data**: Access manufacturer data, service UUIDs, and raw advertisement data
-- **Connection management**: Connect and disconnect from devices
-- **Service discovery**: Get available services and characteristics
-- **Data operations**: Read, write, and subscribe to characteristics
+- Cross-platform support for Windows and Android
+- Device discovery and scanning
+- Advertisement data access
+- Connection management
+- Service and characteristic discovery
+- Read, write, and notification support
 
 ## Installation
 
-Add the library to your project:
+Add to your project:
 
 ```xml
 <PackageReference Include="ble_lib" Version="1.0.0" />
@@ -50,7 +50,7 @@ var devices = await bluetoothService.GetDiscoveredDevicesAsync();
 await bluetoothService.StopScanningAsync();
 ```
 
-### Accessing Advertisement Data
+### Advertisement Data
 
 ```csharp
 foreach (var device in devices)
@@ -116,7 +116,7 @@ if (deviceToConnect != null)
 }
 ```
 
-### Working with Services and Characteristics
+### Services and Characteristics
 
 ```csharp
 // Get services from connected device
@@ -136,7 +136,7 @@ foreach (var service in services)
 }
 ```
 
-### Reading and Writing Data
+### Reading and Writing
 
 ```csharp
 // Example service and characteristic UUIDs (Heart Rate Monitor)
@@ -176,10 +176,9 @@ catch (BluetoothException ex)
 }
 ```
 
-### Subscribing to Notifications
+### Notifications
 
 ```csharp
-// Subscribe to characteristic notifications
 await bluetoothService.SubscribeToCharacteristicAsync(
     deviceToConnect,
     heartRateServiceUuid,
@@ -189,35 +188,22 @@ await bluetoothService.SubscribeToCharacteristicAsync(
         Console.WriteLine($"Received notification: {BitConverter.ToString(data)}");
     });
 
-// Unsubscribe when done
-await bluetoothService.UnsubscribeFromCharacteristicAsync(
-    deviceToConnect,
-    heartRateServiceUuid,
-    heartRateMeasurementUuid);
+await bluetoothService.UnsubscribeFromCharacteristicAsync(device, serviceUuid, characteristicUuid);
 ```
 
 ### Disconnecting
 
 ```csharp
-// Disconnect from device
-await bluetoothService.DisconnectFromDeviceAsync(deviceToConnect);
+await bluetoothService.DisconnectFromDeviceAsync(device);
 ```
 
-## Platform-Specific Notes
+## Platform Notes
 
-### Android
-- Requires location permission for scanning
-- Uses Android.Bluetooth namespace
-- Automatically handles GATT connection lifecycle
+**Android**: Requires location permission for scanning.
 
-### Windows
-- Uses Windows.Devices.Bluetooth namespace
-- Requires Bluetooth capability in app manifest
-- Supports Windows 10 version 19041.0 and later
+**Windows**: Requires Bluetooth capability in app manifest. Supports Windows 10 version 19041.0 and later.
 
 ## Error Handling
-
-The library throws `BluetoothException` for various error conditions:
 
 ```csharp
 try
@@ -226,10 +212,10 @@ try
 }
 catch (BluetoothException ex)
 {
-    Console.WriteLine($"Bluetooth error: {ex.Message}");
+    Console.WriteLine($"Error: {ex.Message}");
 }
 ```
 
 ## License
 
-This library is provided as-is for educational and development purposes. 
+Provided as-is for educational and development purposes. 
